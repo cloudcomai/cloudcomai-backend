@@ -1,7 +1,7 @@
 name: 🚀 Secure Manual Deploy PHP Backend to GoDaddy
 
 on:
-  workflow_dispatch: # Allows you to manually trigger this deployment from the GitHub Actions tab
+  workflow_dispatch:
 
 jobs:
   web-backup-and-deploy:
@@ -12,17 +12,10 @@ jobs:
       - name: 🚚 Get latest repository code
         uses: actions/checkout@v4
 
-      # STEP 1: Connect via FTP and download the current live server files to create a backup
-      - name: 📦 Create Server-Side Backup via FTP Download
-        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
-        with:
-          server: ${{ secrets.FTP_SERVER }}
-          username: ${{ secrets.FTP_USERNAME }}
-          password: ${{ secrets.FTP_PASSWORD }}
-          port: 21                        # Changing back to standard FTP port
-          server-dir: public_html/apiapp/ # Where your live files are
-          local-dir: backups/ # Downloads them safely into this temporary runner folder
-          protocol: ftp
+      # STEP 1: Securely trigger the server-side zip backup engine using curl
+      - name: 📦 Trigger Server-Side Zip Backup
+        run: |
+          curl -sS --fail "https://cloudcomai.com"
 
       # STEP 2: Deploy the fresh code updates over FTP
       - name: 📂 Sync files over FTP to GoDaddy
