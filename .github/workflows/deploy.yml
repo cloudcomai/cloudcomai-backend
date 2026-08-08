@@ -1,0 +1,38 @@
+name: 🚀 Secure Manual Deploy PHP Backend to GoDaddy
+
+on:
+  workflow_dispatch: # Allows you to manually trigger this deployment from the GitHub Actions tab
+
+jobs:
+  web-backup-and-deploy:
+    name: 🛡️ Backup & Sync Files
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 🚚 Get latest repository code
+        uses: actions/checkout@v4
+
+      # STEP 1: Connect to server and create a zip backup of the current production code
+      - name: 📦 Create Server-Side Backup
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          port: 22 
+          script: |
+            mkdir -p /home/fqgo04d2369e/backups/apiapp
+            BACKUP_NAME="backup_$(date +'%Y%m%d_%H%M%S').zip"
+            zip -r /home/fqgo04d2369e/backups/apiapp/$BACKUP_NAME /home/fqgo04d2369e/public_html/apiapp/ -x "**/error_log"
+            echo "✅ Backup created successfully: backups/apiapp/$BACKUP_NAME"
+
+      # STEP 2: Deploy the fresh code updates over FTP
+      - name: 📂 Sync files over FTP to GoDaddy
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          server-dir: public_html/apiapp/ 
+          protocol: ftp
+          port: 21
