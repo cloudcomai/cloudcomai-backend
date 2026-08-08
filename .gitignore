@@ -1,0 +1,14 @@
+# Block sensitive credentials and configuration files
+config/config.php
+config.php
+
+# Block temporary files and runtime crash logs
+error_log
+cron_debug.log
+.DS_Store
+
+# Block user-uploaded files from being tracked
+storage/uploads/*
+!storage/uploads/.gitkeep
+
+GODADDY_BACKEND_DEPLOYMENT.md
