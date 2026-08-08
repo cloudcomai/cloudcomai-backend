@@ -12,19 +12,17 @@ jobs:
       - name: 🚚 Get latest repository code
         uses: actions/checkout@v4
 
-      # STEP 1: Connect to server and create a zip backup of the current production code
-      - name: 📦 Create Server-Side Backup
+      # STEP 1: Connect via FTP and download the current live server files to create a backup
+      - name: 📦 Create Server-Side Backup via FTP Download
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
-          host: ${{ secrets.FTP_SERVER }}
+          server: ${{ secrets.FTP_SERVER }}
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
-          port: 22 
-          script: |
-            mkdir -p /home/fqgo04d2369e/backups/apiapp
-            BACKUP_NAME="backup_$(date +'%Y%m%d_%H%M%S').zip"
-            zip -r /home/fqgo04d2369e/backups/apiapp/$BACKUP_NAME /home/fqgo04d2369e/public_html/apiapp/ -x "**/error_log"
-            echo "✅ Backup created successfully: backups/apiapp/$BACKUP_NAME"
+          port: 21                        # Changing back to standard FTP port
+          server-dir: public_html/apiapp/ # Where your live files are
+          local-dir: ./live-server-backup/ # Downloads them safely into this temporary runner folder
+          protocol: ftp
 
       # STEP 2: Deploy the fresh code updates over FTP
       - name: 📂 Sync files over FTP to GoDaddy
