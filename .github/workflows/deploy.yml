@@ -21,7 +21,7 @@ jobs:
           password: ${{ secrets.FTP_PASSWORD }}
           port: 21                        # Changing back to standard FTP port
           server-dir: public_html/apiapp/ # Where your live files are
-          local-dir: ./live-server-backup/ # Downloads them safely into this temporary runner folder
+          local-dir: backups/ # Downloads them safely into this temporary runner folder
           protocol: ftp
 
       # STEP 2: Deploy the fresh code updates over FTP
