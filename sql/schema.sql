@@ -33,7 +33,7 @@ CREATE TABLE chat_members (
  chat_id BIGINT UNSIGNED NOT NULL,
  user_id BIGINT UNSIGNED NOT NULL,
  role ENUM('owner','admin','moderator','member','readonly') NOT NULL DEFAULT 'member',
- status ENUM('active','pending','removed','banned') NOT NULL DEFAULT 'member',
+ status ENUM('active','pending','removed','banned') NOT NULL DEFAULT 'active',
  joined_at DATETIME NOT NULL,
  PRIMARY KEY(chat_id,user_id), INDEX(user_id,status)
 ) ENGINE=InnoDB;
