@@ -1,5 +1,5 @@
 CREATE DATABASE IF NOT EXISTS cloudcomai CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE i10982974_m6at1;
+USE cloudcomai;
 
 CREATE TABLE users (
  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -33,7 +33,7 @@ CREATE TABLE chat_members (
  chat_id BIGINT UNSIGNED NOT NULL,
  user_id BIGINT UNSIGNED NOT NULL,
  role ENUM('owner','admin','moderator','member','readonly') NOT NULL DEFAULT 'member',
- status ENUM('active','pending','removed','banned') NOT NULL DEFAULT 'active',
+ status ENUM('active','pending','removed','banned') NOT NULL DEFAULT 'member',
  joined_at DATETIME NOT NULL,
  PRIMARY KEY(chat_id,user_id), INDEX(user_id,status)
 ) ENGINE=InnoDB;
@@ -144,4 +144,16 @@ CREATE TABLE calls (
  updated_at DATETIME NULL,
  expires_at DATETIME NOT NULL,
  INDEX(caller_id),INDEX(recipient_id),INDEX(status)
+) ENGINE=InnoDB;
+
+CREATE TABLE password_reset_tokens (
+ id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+ user_id BIGINT UNSIGNED NOT NULL,
+ token_hash CHAR(64) NOT NULL UNIQUE,
+ expires_at DATETIME NOT NULL,
+ created_at DATETIME NOT NULL,
+ used_at DATETIME NULL,
+ INDEX(user_id),
+ INDEX(expires_at),
+ INDEX(user_id,used_at)
 ) ENGINE=InnoDB;
