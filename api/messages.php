@@ -71,9 +71,20 @@ if ($method === 'POST') {
     }
 
     $expires = $row['retention_seconds'] ? gmdate('Y-m-d H:i:s', time() + (int)$row['retention_seconds']) : null;
-    $st = db()->prepare('INSERT INTO messages(chat_id,sender_id,type,body,reply_to_message_id,expires_at,created_at) VALUES(?,?,?,?,?,?,UTC_TIMESTAMP())');
-    $st->execute([$chat,$user['id'],$type,$body,$reply ?: null,$expires]);
-    out(['message'=>['id'=>(int)db()->lastInsertId(),'chat_id'=>$chat,'sender_id'=>(int)$user['id'],'type'=>$type,'body'=>$body,'reply_to_message_id'=>$reply ?: null]],201);
+    $createdAt = gmdate('Y-m-d H:i:s');
+    $st = db()->prepare('INSERT INTO messages(chat_id,sender_id,type,body,reply_to_message_id,expires_at,created_at) VALUES(?,?,?,?,?,?,?)');
+    $st->execute([$chat,$user['id'],$type,$body,$reply ?: null,$expires,$createdAt]);
+    $messageId = (int)db()->lastInsertId();
+
+    out(['message'=>[
+        'id'=>$messageId,
+        'chat_id'=>$chat,
+        'sender_id'=>(int)$user['id'],
+        'type'=>$type,
+        'body'=>$body,
+        'reply_to_message_id'=>$reply ?: null,
+        'created_at'=>$createdAt
+    ]],201);
 }
 
 fail('Method not allowed',405);
