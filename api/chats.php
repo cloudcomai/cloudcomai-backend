@@ -15,35 +15,26 @@ if ($method === 'GET') {
             c.type,
             c.name,
             c.group_category,
+            c.owner_id,
             c.retention_seconds,
             c.created_at,
             MAX(m.created_at) AS last_message_at
         FROM chats c
-        INNER JOIN chat_members cm
-            ON cm.chat_id = c.id
-        LEFT JOIN messages m
-            ON m.chat_id = c.id
+        INNER JOIN chat_members cm ON cm.chat_id = c.id
+        LEFT JOIN messages m ON m.chat_id = c.id
         WHERE cm.user_id = ?
           AND cm.status = "active"
     ';
 
     $params = [$user['id']];
     if ($type !== '') {
-        if (!in_array($type, ['private', 'group', 'public', 'community'], true)) {
-            fail('Invalid chat type');
-        }
+        if (!in_array($type, ['private', 'group', 'public', 'community'], true)) fail('Invalid chat type');
         $sql .= ' AND c.type = ?';
         $params[] = $type;
     }
 
     $sql .= '
-        GROUP BY
-            c.id,
-            c.type,
-            c.name,
-            c.group_category,
-            c.retention_seconds,
-            c.created_at
+        GROUP BY c.id, c.type, c.name, c.group_category, c.owner_id, c.retention_seconds, c.created_at
         ORDER BY COALESCE(MAX(m.created_at), c.created_at) DESC
     ';
 
@@ -52,8 +43,11 @@ if ($method === 'GET') {
         $st->execute($params);
         $chats = $st->fetchAll();
 
-        // Give private chats a useful participant name instead of a null/shared name.
         foreach ($chats as &$chat) {
+            $chat['id'] = (int)$chat['id'];
+            $chat['owner_id'] = $chat['owner_id'] !== null ? (int)$chat['owner_id'] : null;
+            $chat['isGroup'] = $chat['type'] === 'group';
+
             if ($chat['type'] === 'private') {
                 $other = $pdo->prepare('
                     SELECT u.id, u.name, u.user_id
@@ -87,65 +81,50 @@ if ($method === 'GET') {
 if ($method === 'POST') {
     $d = input();
     $type = (string)($d['type'] ?? '');
-
-    if ($type !== 'private') {
-        fail('Unsupported chat creation type');
-    }
+    if ($type !== 'private') fail('Unsupported chat creation type');
 
     $targetUserId = (int)($d['target_user_id'] ?? 0);
-    if ($targetUserId <= 0 || $targetUserId === (int)$user['id']) {
-        fail('A valid target user is required');
-    }
+    if ($targetUserId <= 0 || $targetUserId === (int)$user['id']) fail('A valid target user is required');
 
     try {
-        $target = $pdo->prepare('SELECT id, name, user_id, account_status FROM users WHERE id = ? LIMIT 1');
+        $target = $pdo->prepare('SELECT id, name, user_id, account_status FROM users WHERE id=? LIMIT 1');
         $target->execute([$targetUserId]);
         $targetUser = $target->fetch();
-        if (!$targetUser || $targetUser['account_status'] !== 'active') {
-            fail('Target user is unavailable', 404);
-        }
+        if (!$targetUser || $targetUser['account_status'] !== 'active') fail('Target user is unavailable', 404);
 
-        // Reuse an existing private chat for the same two active members.
         $existing = $pdo->prepare('
-            SELECT c.id, c.type, c.name
+            SELECT c.id
             FROM chats c
-            INNER JOIN chat_members a ON a.chat_id = c.id AND a.user_id = ? AND a.status = "active"
-            INNER JOIN chat_members b ON b.chat_id = c.id AND b.user_id = ? AND b.status = "active"
-            WHERE c.type = "private"
+            INNER JOIN chat_members a ON a.chat_id=c.id AND a.user_id=? AND a.status="active"
+            INNER JOIN chat_members b ON b.chat_id=c.id AND b.user_id=? AND b.status="active"
+            WHERE c.type="private"
             LIMIT 1
         ');
         $existing->execute([$user['id'], $targetUserId]);
         $chat = $existing->fetch();
 
-        if ($chat) {
-            out(['chat' => [
-                'id' => (int)$chat['id'],
-                'type' => 'private',
-                'name' => $targetUser['name'],
-                'other_user_id' => (int)$targetUser['id'],
-                'other_user_name' => $targetUser['name'],
-                'other_user_id_text' => $targetUser['user_id']
-            ]]);
+        if (!$chat) {
+            $pdo->beginTransaction();
+            $insert = $pdo->prepare('INSERT INTO chats(type,name,owner_id,created_at) VALUES("private",NULL,?,UTC_TIMESTAMP())');
+            $insert->execute([$user['id']]);
+            $chatId = (int)$pdo->lastInsertId();
+            $member = $pdo->prepare('INSERT INTO chat_members(chat_id,user_id,role,status,joined_at) VALUES(?,?,"member","active",UTC_TIMESTAMP())');
+            $member->execute([$chatId, $user['id']]);
+            $member->execute([$chatId, $targetUserId]);
+            $pdo->commit();
+        } else {
+            $chatId = (int)$chat['id'];
         }
-
-        $pdo->beginTransaction();
-        $insert = $pdo->prepare('INSERT INTO chats(type,name,owner_id,created_at) VALUES("private",NULL,?,UTC_TIMESTAMP())');
-        $insert->execute([$user['id']]);
-        $chatId = (int)$pdo->lastInsertId();
-
-        $member = $pdo->prepare('INSERT INTO chat_members(chat_id,user_id,role,status,joined_at) VALUES(?,?,"member","active",UTC_TIMESTAMP())');
-        $member->execute([$chatId, $user['id']]);
-        $member->execute([$chatId, $targetUserId]);
-        $pdo->commit();
 
         out(['chat' => [
             'id' => $chatId,
             'type' => 'private',
             'name' => $targetUser['name'],
+            'owner_id' => (int)$user['id'],
             'other_user_id' => (int)$targetUser['id'],
             'other_user_name' => $targetUser['name'],
             'other_user_id_text' => $targetUser['user_id']
-        ]], 201);
+        ]], $chat ? 200 : 201);
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
         error_log('chats.php POST error: ' . $e->getMessage());
