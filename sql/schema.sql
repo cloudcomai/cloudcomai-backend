@@ -145,3 +145,15 @@ CREATE TABLE calls (
  expires_at DATETIME NOT NULL,
  INDEX(caller_id),INDEX(recipient_id),INDEX(status)
 ) ENGINE=InnoDB;
+
+CREATE TABLE password_reset_tokens (
+ id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+ user_id BIGINT UNSIGNED NOT NULL,
+ token_hash CHAR(64) NOT NULL UNIQUE,
+ expires_at DATETIME NOT NULL,
+ created_at DATETIME NOT NULL,
+ used_at DATETIME NULL,
+ INDEX(user_id),
+ INDEX(expires_at),
+ INDEX(user_id,used_at)
+) ENGINE=InnoDB;

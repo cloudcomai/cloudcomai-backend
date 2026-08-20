@@ -9,7 +9,12 @@ return [
     ],
     'app' => [
         'base_url' => 'https://api.cloudcomai.com',
-        'allowed_origins' => ['https://app.cloudcomai.com'],
+        'web_url' => 'https://cloudcomai.com',
+        'allowed_origins' => [
+            'https://cloudcomai.com',
+            'https://www.cloudcomai.com',
+            'https://app.cloudcomai.com',
+        ],
         'token_secret' => 'CHANGE_TO_A_LONG_RANDOM_SECRET',
         'upload_dir' => __DIR__ . '/../storage/uploads',
     ],
