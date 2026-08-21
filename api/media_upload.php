@@ -39,6 +39,16 @@ $extensions = [
 ];
 if (!isset($extensions[$mime])) fail('Only JPG, PNG and WebP images are supported');
 
+$imageInfo = @getimagesize($file['tmp_name']);
+if (!$imageInfo || empty($imageInfo[0]) || empty($imageInfo[1])) {
+    fail('Unable to read image dimensions');
+}
+
+$maxDimension = 1024;
+if ((int)$imageInfo[0] > $maxDimension || (int)$imageInfo[1] > $maxDimension) {
+    fail('Image dimensions must not exceed 1024 x 1024 pixels');
+}
+
 $folder = dirname(__DIR__) . '/uploads/' . ($type === 'user' ? 'users' : 'groups');
 if (!is_dir($folder) && !mkdir($folder, 0755, true) && !is_dir($folder)) {
     fail('Unable to prepare image storage', 500);
@@ -59,5 +69,7 @@ out([
     'type' => $type,
     'id' => $id,
     'image_url' => $imageUrl,
+    'width' => (int)$imageInfo[0],
+    'height' => (int)$imageInfo[1],
     'updated_at' => filemtime($destination) ?: time()
 ]);
