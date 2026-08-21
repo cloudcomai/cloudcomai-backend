@@ -11,7 +11,7 @@ if ($method === 'GET') {
     $m->execute([$chat, $user['id']]);
     if (!$m->fetch()) fail('Not a member', 403);
 
-    $st = db()->prepare('SELECT m.id,m.chat_id,m.sender_id,m.type,m.body,m.reply_to_message_id,m.edit_count,m.edited_at,m.created_at,u.name sender_name FROM messages m JOIN users u ON u.id=m.sender_id WHERE m.chat_id=? AND m.id>? AND m.deleted_for_everyone=0 AND (m.expires_at IS NULL OR m.expires_at>UTC_TIMESTAMP()) ORDER BY m.id ASC LIMIT 200');
+    $st = db()->prepare('SELECT m.id,m.chat_id,m.sender_id,m.type,m.body,m.reply_to_message_id,m.edit_count,m.edited_at,m.created_at,u.name AS sender_name,r.body AS reply_to_text,ru.name AS reply_to_sender_name FROM messages m JOIN users u ON u.id=m.sender_id LEFT JOIN messages r ON r.id=m.reply_to_message_id LEFT JOIN users ru ON ru.id=r.sender_id WHERE m.chat_id=? AND m.id>? AND m.deleted_for_everyone=0 AND (m.expires_at IS NULL OR m.expires_at>UTC_TIMESTAMP()) ORDER BY m.id ASC LIMIT 200');
     $st->execute([$chat, $after]);
     $messages = $st->fetchAll();
 
@@ -76,15 +76,22 @@ if ($method === 'POST') {
     $st->execute([$chat,$user['id'],$type,$body,$reply ?: null,$expires,$createdAt]);
     $messageId = (int)db()->lastInsertId();
 
-    out(['message'=>[
-        'id'=>$messageId,
-        'chat_id'=>$chat,
-        'sender_id'=>(int)$user['id'],
-        'type'=>$type,
-        'body'=>$body,
-        'reply_to_message_id'=>$reply ?: null,
-        'created_at'=>$createdAt
-    ]],201);
+    $created = db()->prepare('SELECT m.id,m.chat_id,m.sender_id,m.type,m.body,m.reply_to_message_id,m.edit_count,m.edited_at,m.created_at,u.name AS sender_name,r.body AS reply_to_text,ru.name AS reply_to_sender_name FROM messages m JOIN users u ON u.id=m.sender_id LEFT JOIN messages r ON r.id=m.reply_to_message_id LEFT JOIN users ru ON ru.id=r.sender_id WHERE m.id=?');
+    $created->execute([$messageId]);
+    $message = $created->fetch();
+
+    out(['message' => [
+        'id' => (int)$message['id'],
+        'chat_id' => (int)$message['chat_id'],
+        'sender_id' => (int)$message['sender_id'],
+        'sender_name' => $message['sender_name'],
+        'type' => $message['type'],
+        'body' => $message['body'],
+        'reply_to_message_id' => $message['reply_to_message_id'] !== null ? (int)$message['reply_to_message_id'] : null,
+        'reply_to_text' => $message['reply_to_text'],
+        'reply_to_sender_name' => $message['reply_to_sender_name'],
+        'created_at' => $message['created_at']
+    ]], 201);
 }
 
 fail('Method not allowed',405);
