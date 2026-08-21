@@ -11,7 +11,7 @@ $file = $_FILES['image'] ?? null;
 if (!in_array($type, ['user', 'group'], true)) fail('Invalid image target');
 if ($id <= 0) fail('Invalid image target id');
 if (!$file || !isset($file['error']) || $file['error'] !== UPLOAD_ERR_OK) fail('Image upload failed');
-if ((int)$file['size'] > 5 * 1024 * 1024) fail('Image must be 5 MB or smaller');
+if ((int)$file['size'] > 2 * 1024 * 1024) fail('Image must be 2 MB or smaller');
 
 if ($type === 'user' && $id !== (int)$user['id']) {
     fail('You can only update your own profile image', 403);
