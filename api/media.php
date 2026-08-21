@@ -1,7 +1,6 @@
 <?php
 require __DIR__ . '/../lib/bootstrap.php';
 
-type: user|group
 $map = [
     'user' => 'users',
     'group' => 'groups'
