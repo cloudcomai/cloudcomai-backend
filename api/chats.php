@@ -50,7 +50,8 @@ if ($method === 'GET') {
 
             if ($chat['type'] === 'private') {
                 $other = $pdo->prepare('
-                    SELECT u.id, u.name, u.user_id
+                    SELECT u.id, u.name, u.user_id, u.updated_at,
+                           CASE WHEN u.updated_at IS NOT NULL AND u.updated_at >= UTC_TIMESTAMP() - INTERVAL 90 SECOND THEN 1 ELSE 0 END AS online
                     FROM chat_members cm
                     INNER JOIN users u ON u.id = cm.user_id
                     WHERE cm.chat_id = ?
@@ -66,6 +67,8 @@ if ($method === 'GET') {
                     $chat['other_user_name'] = $participant['name'];
                     $chat['other_user_id_text'] = $participant['user_id'];
                     $chat['name'] = $participant['name'];
+                    $chat['online'] = (bool)$participant['online'];
+                    $chat['other_user_online'] = (bool)$participant['online'];
                 }
             }
         }
@@ -87,7 +90,7 @@ if ($method === 'POST') {
     if ($targetUserId <= 0 || $targetUserId === (int)$user['id']) fail('A valid target user is required');
 
     try {
-        $target = $pdo->prepare('SELECT id, name, user_id, account_status FROM users WHERE id=? LIMIT 1');
+        $target = $pdo->prepare('SELECT id, name, user_id, account_status, updated_at, CASE WHEN updated_at IS NOT NULL AND updated_at >= UTC_TIMESTAMP() - INTERVAL 90 SECOND THEN 1 ELSE 0 END AS online FROM users WHERE id=? LIMIT 1');
         $target->execute([$targetUserId]);
         $targetUser = $target->fetch();
         if (!$targetUser || $targetUser['account_status'] !== 'active') fail('Target user is unavailable', 404);
@@ -123,7 +126,9 @@ if ($method === 'POST') {
             'owner_id' => (int)$user['id'],
             'other_user_id' => (int)$targetUser['id'],
             'other_user_name' => $targetUser['name'],
-            'other_user_id_text' => $targetUser['user_id']
+            'other_user_id_text' => $targetUser['user_id'],
+            'online' => (bool)$targetUser['online'],
+            'other_user_online' => (bool)$targetUser['online']
         ]], $chat ? 200 : 201);
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
