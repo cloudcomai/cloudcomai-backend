@@ -57,6 +57,23 @@ if ($method === 'POST') {
     } catch(Throwable $e){ $pdo->rollBack(); error_log('groups.php POST error: '.$e->getMessage()); fail('Group creation failed',500); }
 }
 
+if ($method === 'PUT') {
+    $chatId = (int)($_GET['id'] ?? 0);
+    if ($chatId <= 0) fail('Group id is required');
+    $member = $pdo->prepare('SELECT role FROM chat_members WHERE chat_id=? AND user_id=? AND status="active" LIMIT 1');
+    $member->execute([$chatId, $user['id']]);
+    $memberRow = $member->fetch();
+    if (!$memberRow || !in_array($memberRow['role'], ['owner','admin'], true)) fail('Only group owners or admins can edit this group', 403);
+
+    $d = input();
+    $name = trim((string)($d['name'] ?? ''));
+    $type = (string)($d['group_category'] ?? '');
+    if ($name === '' || !in_array($type, $types, true)) fail('Valid group name and category are required');
+    $st = $pdo->prepare('UPDATE chats SET name=?, group_category=?, updated_at=UTC_TIMESTAMP() WHERE id=? AND type="group"');
+    $st->execute([$name, $type, $chatId]);
+    out(['group'=>['id'=>$chatId,'type'=>'group','name'=>$name,'group_category'=>$type,'owner_id'=>(int)$user['id'],'isGroup'=>true]]);
+}
+
 if ($method === 'DELETE') {
     $chatId=(int)($_GET['id'] ?? 0);
     if ($chatId <= 0) fail('Group id is required');
