@@ -5,7 +5,7 @@ on:
 
 jobs:
   web-backup-and-deploy:
-    name: 🛡️ Backup & Sync Files
+    name: 🛡️ Backup, Sync & Migrate
     runs-on: ubuntu-latest
 
     steps:
@@ -24,6 +24,26 @@ jobs:
           server: ${{ secrets.FTP_SERVER }}
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
-          server-dir: public_html/apiapp/ 
+          server-dir: public_html/apiapp/
           protocol: ftp
           port: 21
+
+      # STEP 3: Run all pending database migrations on the server.
+      # The migration runner uses the server's existing DB configuration,
+      # so database credentials are not stored in GitHub Actions.
+      - name: 🗄️ Run database migrations
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.CPANEL_SSH_HOST }}
+          username: ${{ secrets.CPANEL_SSH_USERNAME }}
+          key: ${{ secrets.CPANEL_SSH_KEY }}
+          port: ${{ secrets.CPANEL_SSH_PORT || 22 }}
+          script_stop: true
+          script: |
+            cd /home/${{ secrets.CPANEL_SSH_USERNAME }}/apiapp
+            php scripts/migrate.php
+
+      # STEP 4: Fail deployment if migration runner did not complete successfully.
+      # appleboy/ssh-action propagates the remote exit code to this job.
+      - name: ✅ Deployment completed
+        run: echo "Backend deployment and database migrations completed successfully."
