@@ -86,6 +86,10 @@ jobs:
           mkdir -p deploy-package/config
           printf '%s\n' "${PRODUCTION_CONFIG_PHP}" > deploy-package/config/config.php
 
+          mkdir -p deploy-package/deploy-migrations/backup
+          cp api/deploy-backup.php deploy-package/deploy-migrations/backup/deploy-backup.php
+          cp api/restore-backup.php deploy-package/deploy-migrations/backup/restore-backup.php
+
       - name: 📂 Full initial deployment
         if: ${{ inputs.deployment_mode == 'initial' }}
         id: initial_deploy
@@ -167,9 +171,6 @@ jobs:
             storage/**
             deploy-migrations/backup/**
 
-      # One rollback path handles every post-backup failure. The exact backup
-      # archive created before deployment is the source of truth for restoring
-      # the server filesystem.
       - name: 🔄 Roll back failed deployment to previous filesystem state
         if: ${{ steps.initial_deploy.outcome == 'failure' || steps.migration.outcome == 'failure' || steps.release_deploy.outcome == 'failure' }}
         env:
