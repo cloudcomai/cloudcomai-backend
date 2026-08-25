@@ -5,20 +5,53 @@ on:
 
 jobs:
   web-backup-and-deploy:
-    name: 🛡️ Backup, Sync & Migrate
+    name: 🛡️ Backup, Migrate & Deploy
     runs-on: ubuntu-latest
 
     steps:
       - name: 🚚 Get latest repository code
         uses: actions/checkout@v4
 
-      # STEP 1: Securely trigger the server-side zip backup engine using curl
+      # STEP 1: Backup production before making any server-side changes.
       - name: 📦 Trigger Server-Side Zip Backup
         run: |
           curl -sS --fail "https://cloudcomai.com"
 
-      # STEP 2: Deploy the fresh code updates over FTP
-      - name: 📂 Sync files over FTP to GoDaddy
+      # STEP 2: Upload only the migration runner, migration files and the
+      # protected trigger endpoint. No application PHP files are deployed yet.
+      - name: 📦 Prepare migration package
+        run: |
+          rm -rf migration-package
+          mkdir -p migration-package/scripts migration-package/database/migrations migration-package/api
+          cp scripts/migrate.php migration-package/scripts/migrate.php
+          cp api/deploy-migrate.php migration-package/api/deploy-migrate.php
+          cp database/migrations/*.sql migration-package/database/migrations/
+
+      - name: 📂 Upload migration package only
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          local-dir: ./migration-package/
+          server-dir: public_html/apiapp/
+          protocol: ftp
+          port: 21
+
+      # STEP 3: Ask the server to execute PHP migrations. The endpoint
+      # validates MIGRATION_TOKEN and returns failure if migrate.php fails.
+      - name: 🗄️ Run database migrations
+        env:
+          MIGRATION_TOKEN: ${{ secrets.MIGRATION_TOKEN }}
+        run: |
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer ${MIGRATION_TOKEN}" \
+            -H "Accept: application/json" \
+            https://www.cloudcomai.com/apiapp/api/deploy-migrate.php
+
+      # STEP 4: Only reached when the migration request returned HTTP 2xx.
+      # The full application is deployed after successful migrations.
+      - name: 📂 Sync application files over FTP to GoDaddy
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
           server: ${{ secrets.FTP_SERVER }}
@@ -28,22 +61,5 @@ jobs:
           protocol: ftp
           port: 21
 
-      # STEP 3: Run all pending database migrations on the server.
-      # The migration runner uses the server's existing DB configuration,
-      # so database credentials are not stored in GitHub Actions.
-      - name: 🗄️ Run database migrations
-        uses: appleboy/ssh-action@v1.2.2
-        with:
-          host: ${{ secrets.CPANEL_SSH_HOST }}
-          username: ${{ secrets.CPANEL_SSH_USERNAME }}
-          key: ${{ secrets.CPANEL_SSH_KEY }}
-          port: ${{ secrets.CPANEL_SSH_PORT || 22 }}
-          script_stop: true
-          script: |
-            cd /home/${{ secrets.CPANEL_SSH_USERNAME }}/apiapp
-            php scripts/migrate.php
-
-      # STEP 4: Fail deployment if migration runner did not complete successfully.
-      # appleboy/ssh-action propagates the remote exit code to this job.
       - name: ✅ Deployment completed
-        run: echo "Backend deployment and database migrations completed successfully."
+        run: echo "Database migrations and application deployment completed successfully."
