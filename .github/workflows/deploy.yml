@@ -69,26 +69,15 @@ jobs:
           echo "BACKUP_NAME=${BACKUP}" >> "$GITHUB_ENV"
           echo "✅ Backup completed successfully."
 
-      - name: 🔐 Prepare initial full deployment package
+      - name: 📦 Prepare initial full deployment package
         if: ${{ inputs.deployment_mode == 'initial' }}
-        env:
-          PRODUCTION_CONFIG_PHP: ${{ secrets.PRODUCTION_CONFIG_PHP }}
         run: |
           rm -rf deploy-package
           mkdir -p deploy-package
           rsync -a --exclude='.git/' --exclude='.github/' ./ deploy-package/
 
-          if [ -z "${PRODUCTION_CONFIG_PHP}" ]; then
-            echo "❌ PRODUCTION_CONFIG_PHP secret is required for the initial deployment."
-            exit 1
-          fi
-
-          mkdir -p deploy-package/config
-          printf '%s\n' "${PRODUCTION_CONFIG_PHP}" > deploy-package/config/config.php
-
-          mkdir -p deploy-package/deploy-migrations/backup
-          cp api/deploy-backup.php deploy-package/deploy-migrations/backup/deploy-backup.php
-          cp api/restore-backup.php deploy-package/deploy-migrations/backup/restore-backup.php
+          echo "Initial deployment will synchronize the complete repository contents."
+          echo "No production configuration is generated or injected by the workflow."
 
       - name: 📂 Full initial deployment
         if: ${{ inputs.deployment_mode == 'initial' }}
@@ -169,7 +158,6 @@ jobs:
             **/.git*
             **/.git*/**
             .github/**
-            config/config.php
             storage/**
             deploy-migrations/backup/**
 
