@@ -17,8 +17,8 @@ jobs:
         run: |
           curl -sS --fail "https://cloudcomai.com"
 
-      # STEP 2: Upload only the migration runner, migration files and the
-      # protected trigger endpoint. No application PHP files are deployed yet.
+      # STEP 2: Build an isolated migration package. It is uploaded under
+      # /apiapp/deploy-migrations/, so FTP sync can never delete live API files.
       - name: 📦 Prepare migration package
         run: |
           rm -rf migration-package
@@ -34,12 +34,11 @@ jobs:
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
           local-dir: ./migration-package/
-          server-dir: public_html/apiapp/
+          server-dir: public_html/apiapp/deploy-migrations/
           protocol: ftp
           port: 21
 
-      # STEP 3: Ask the server to execute PHP migrations. The endpoint
-      # validates MIGRATION_TOKEN and returns failure if migrate.php fails.
+      # STEP 3: Ask the isolated server endpoint to execute PHP migrations.
       - name: 🗄️ Run database migrations
         env:
           MIGRATION_TOKEN: ${{ secrets.MIGRATION_TOKEN }}
@@ -47,10 +46,9 @@ jobs:
           curl --fail --silent --show-error \
             -H "Authorization: Bearer ${MIGRATION_TOKEN}" \
             -H "Accept: application/json" \
-            https://www.cloudcomai.com/apiapp/api/deploy-migrate.php
+            https://www.cloudcomai.com/apiapp/deploy-migrations/api/deploy-migrate.php
 
       # STEP 4: Only reached when the migration request returned HTTP 2xx.
-      # The full application is deployed after successful migrations.
       - name: 📂 Sync application files over FTP to GoDaddy
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
