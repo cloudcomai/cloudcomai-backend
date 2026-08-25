@@ -2,12 +2,19 @@
 
 declare(strict_types=1);
 
-require_once __DIR__ . '/../lib/bootstrap.php';
+// This script is deployed under /apiapp/deploy-migrations/scripts/.
+// The application itself remains under /apiapp/.
+$appRoot = dirname(__DIR__, 2);
+$migrationRoot = dirname(__DIR__);
+
+require_once $appRoot . '/lib/bootstrap.php';
 
 function cloudcomaiRunMigrations(): int
 {
+    global $migrationRoot;
+
     $pdo = db();
-    $migrationsPath = dirname(__DIR__) . '/database/migrations';
+    $migrationsPath = $migrationRoot . '/database/migrations';
     $lockName = 'cloudcomai_database_migration';
 
     if (!is_dir($migrationsPath)) {
