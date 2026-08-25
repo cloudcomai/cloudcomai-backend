@@ -12,13 +12,44 @@ jobs:
       - name: 🚚 Get latest repository code
         uses: actions/checkout@v4
 
-      # STEP 1: Backup production before making any server-side changes.
-      - name: 📦 Trigger Server-Side Zip Backup
+      # STEP 1: Upload only the backup endpoint into the isolated deployment area.
+      # This makes the backup available even on the first deployment after the
+      # old backup implementation was removed.
+      - name: 📦 Prepare backup package
         run: |
-          curl -sS --fail "https://cloudcomai.com"
+          rm -rf backup-package
+          mkdir -p backup-package
+          cp api/deploy-backup.php backup-package/deploy-backup.php
 
-      # STEP 2: Build an isolated migration package. It is uploaded under
-      # /apiapp/deploy-migrations/, so FTP sync can never delete live API files.
+      - name: 📂 Upload backup endpoint
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          local-dir: ./backup-package/
+          server-dir: public_html/apiapp/deploy-migrations/backup/
+          protocol: ftp
+          port: 21
+
+      # STEP 2: Create and verify a compressed backup on GoDaddy BEFORE any
+      # application files are synchronized. The archive is stored outside
+      # public_html and the endpoint retains only the five newest archives.
+      - name: 🛡️ Create verified compressed server backup
+        env:
+          MIGRATION_TOKEN: ${{ secrets.MIGRATION_TOKEN }}
+        run: |
+          RESPONSE=$(curl --fail --silent --show-error \
+            -H "Authorization: Bearer ${MIGRATION_TOKEN}" \
+            -H "Accept: application/json" \
+            https://www.cloudcomai.com/apiapp/deploy-migrations/backup/deploy-backup.php)
+
+          echo "Backup response: ${RESPONSE}"
+
+          echo "${RESPONSE}" | python -c 'import json,sys; data=json.load(sys.stdin); assert data.get("success") is True, data.get("error", "Backup failed"); assert int(data.get("size", 0)) > 0, "Backup archive is empty"; print(f"Verified backup: {data.get(\"backup\")} ({data.get(\"size\")} bytes)")'
+
+      # STEP 3: Build an isolated migration package. It is uploaded under
+      # /apiapp/deploy-migrations/, so FTP sync cannot delete live API files.
       - name: 📦 Prepare migration package
         run: |
           rm -rf migration-package
@@ -38,7 +69,8 @@ jobs:
           protocol: ftp
           port: 21
 
-      # STEP 3: Ask the isolated server endpoint to execute PHP migrations.
+      # STEP 4: Run migrations. Application deployment is blocked unless this
+      # request returns HTTP 2xx.
       - name: 🗄️ Run database migrations
         env:
           MIGRATION_TOKEN: ${{ secrets.MIGRATION_TOKEN }}
@@ -48,7 +80,8 @@ jobs:
             -H "Accept: application/json" \
             https://www.cloudcomai.com/apiapp/deploy-migrations/api/deploy-migrate.php
 
-      # STEP 4: Only reached when the migration request returned HTTP 2xx.
+      # STEP 5: Deploy the application only after the backup and migrations
+      # have both succeeded.
       - name: 📂 Sync application files over FTP to GoDaddy
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
@@ -60,4 +93,4 @@ jobs:
           port: 21
 
       - name: ✅ Deployment completed
-        run: echo "Database migrations and application deployment completed successfully."
+        run: echo "Verified compressed backup, database migrations and application deployment completed successfully."
