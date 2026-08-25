@@ -36,15 +36,18 @@ if ($providedToken === '' || !hash_equals($expectedToken, $providedToken)) {
     exit;
 }
 
+require_once __DIR__ . '/../scripts/migrate.php';
+
 ob_start();
 
 try {
-    require __DIR__ . '/../scripts/migrate.php';
-    $output = trim(ob_get_clean());
+    $applied = cloudcomaiRunMigrations();
+    $output = trim((string)ob_get_clean());
 
     http_response_code(200);
     echo json_encode([
         'success' => true,
+        'applied' => $applied,
         'message' => 'Database migrations completed successfully.',
         'output' => $output,
     ]);
