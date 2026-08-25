@@ -126,6 +126,8 @@ jobs:
           server-dir: public_html/apiapp/deploy-migrations/
           protocol: ftp
           port: 21
+          exclude: |
+            backup/**
 
       - name: 🗄️ Run database migrations
         id: migration
