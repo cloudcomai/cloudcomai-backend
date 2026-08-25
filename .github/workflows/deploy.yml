@@ -26,15 +26,13 @@ jobs:
         uses: actions/checkout@v4
 
       - name: 📦 Prepare deployment recovery tools
-        if: ${{ inputs.deployment_mode == 'initial' }}
         run: |
           rm -rf recovery-tools
           mkdir -p recovery-tools
           cp api/deploy-backup.php recovery-tools/deploy-backup.php
           cp api/restore-backup.php recovery-tools/restore-backup.php
 
-      - name: 📂 Install deployment recovery tools
-        if: ${{ inputs.deployment_mode == 'initial' }}
+      - name: 📂 Upload deployment recovery tools
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
           server: ${{ secrets.FTP_SERVER }}
@@ -69,17 +67,38 @@ jobs:
           echo "BACKUP_NAME=${BACKUP}" >> "$GITHUB_ENV"
           echo "✅ Backup completed successfully."
 
-      - name: 📦 Prepare initial full deployment package
+      - name: 📦 Prepare migration package
+        run: |
+          rm -rf migration-package
+          mkdir -p migration-package/scripts migration-package/database/migrations migration-package/api migration-package/lib
+          cp scripts/migrate.php migration-package/scripts/migrate.php
+          cp scripts/migration-bootstrap.php migration-package/lib/bootstrap.php
+          cp api/deploy-migrate.php migration-package/api/deploy-migrate.php
+          cp database/migrations/*.sql migration-package/database/migrations/
+
+      - name: 📂 Upload migration package
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          local-dir: ./migration-package/
+          server-dir: public_html/apiapp/deploy-migrations/
+          protocol: ftp
+          port: 21
+          exclude: |
+            backup/**
+
+      - name: 📦 Prepare full initial application deployment package
         if: ${{ inputs.deployment_mode == 'initial' }}
         run: |
           rm -rf deploy-package
           mkdir -p deploy-package
-          rsync -a --exclude='.git/' --exclude='.github/' --exclude='config/' ./ deploy-package/
+          rsync -a --exclude='.git/' --exclude='.github/' --exclude='config/' --exclude='deploy-migrations/' ./ deploy-package/
+          echo "Initial application package prepared."
+          echo "Existing server config is protected."
 
-          echo "Initial deployment will synchronize all repository files except the protected config directory."
-          echo "The existing server config directory will not be deleted or modified."
-
-      - name: 📂 Full initial deployment
+      - name: 📂 Full initial application deployment
         if: ${{ inputs.deployment_mode == 'initial' }}
         id: initial_deploy
         continue-on-error: true
@@ -92,35 +111,9 @@ jobs:
           server-dir: public_html/apiapp/
           protocol: ftp
           port: 21
-          dangerous-clean-slate: false
           exclude: |
             config/**
-            **/config/**
-
-      - name: 📦 Prepare migration package
-        if: ${{ inputs.deployment_mode == 'release' }}
-        run: |
-          rm -rf migration-package
-          mkdir -p migration-package/scripts migration-package/database/migrations migration-package/api migration-package/lib
-          cp scripts/migrate.php migration-package/scripts/migrate.php
-          cp scripts/migration-bootstrap.php migration-package/lib/bootstrap.php
-          cp api/deploy-migrate.php migration-package/api/deploy-migrate.php
-          cp database/migrations/*.sql migration-package/database/migrations/
-
-      - name: 📂 Upload migration package only
-        if: ${{ inputs.deployment_mode == 'release' }}
-        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
-        with:
-          server: ${{ secrets.FTP_SERVER }}
-          username: ${{ secrets.FTP_USERNAME }}
-          password: ${{ secrets.FTP_PASSWORD }}
-          local-dir: ./migration-package/
-          server-dir: public_html/apiapp/deploy-migrations/
-          protocol: ftp
-          port: 21
-          exclude: |
-            backup/**
-            config/**
+            deploy-migrations/**
 
       - name: 🗄️ Run database migrations
         id: migration
@@ -162,10 +155,10 @@ jobs:
             **/.git*
             **/.git*/**
             .github/**
-            storage/**
             config/**
             **/config/**
-            deploy-migrations/backup/**
+            deploy-migrations/**
+            storage/**
 
       - name: 🔄 Roll back failed deployment to previous filesystem state
         if: ${{ steps.initial_deploy.outcome == 'failure' || steps.migration.outcome == 'failure' || steps.release_deploy.outcome == 'failure' }}
@@ -192,7 +185,7 @@ jobs:
           echo "✅ Previous filesystem state restored from compressed backup."
           exit 1
 
-      - name: ❌ Fail deployment after rollback or failed initial package preparation
+      - name: ❌ Fail deployment after rollback or failed deployment
         if: ${{ failure() }}
         run: |
           echo "❌ Deployment did not complete."
@@ -215,4 +208,4 @@ jobs:
           echo "Backup success: True"
           echo "Migration success: True"
           echo "Deployment success: True"
-          echo "Existing server config is protected from deployment changes."
+          echo "Existing server config is protected."
