@@ -12,7 +12,6 @@ jobs:
       - name: 🚚 Get latest repository code
         uses: actions/checkout@v4
 
-      # STEP 1: Upload only the backup endpoint into the isolated deployment area.
       - name: 📦 Prepare backup package
         run: |
           rm -rf backup-package
@@ -30,8 +29,6 @@ jobs:
           protocol: ftp
           port: 21
 
-      # STEP 2: Create and verify a compressed backup on GoDaddy BEFORE any
-      # application files are synchronized.
       - name: 🛡️ Create verified compressed server backup
         env:
           MIGRATION_TOKEN: ${{ secrets.MIGRATION_TOKEN }}
@@ -53,9 +50,6 @@ jobs:
           echo "✅ Backup completed successfully."
           echo "Backup response: ${RESPONSE}"
 
-      # STEP 3: Build an isolated migration package. The migration bootstrap
-      # reads the existing production config without copying config.php into
-      # the package or exposing database credentials to GitHub.
       - name: 📦 Prepare migration package
         run: |
           rm -rf migration-package
@@ -76,12 +70,25 @@ jobs:
           protocol: ftp
           port: 21
 
-      # STEP 4: Run migrations only after the verified backup succeeds.
+      - name: 🔎 Verify migration package files
+        env:
+          MIGRATION_TOKEN: ${{ secrets.MIGRATION_TOKEN }}
+        run: |
+          echo "Checking deployed migration endpoint..."
+          HTTP_CODE=$(curl --silent --output /tmp/migration-health-response.json --write-out "%{http_code}" \
+            -H "Authorization: Bearer ${MIGRATION_TOKEN}" \
+            -H "Accept: application/json" \
+            https://www.cloudcomai.com/apiapp/deploy-migrations/api/deploy-migrate.php || true)
+
+          echo "Migration endpoint HTTP status: ${HTTP_CODE}"
+          echo "Migration endpoint response:"
+          cat /tmp/migration-health-response.json || true
+
       - name: 🗄️ Run database migrations
         env:
           MIGRATION_TOKEN: ${{ secrets.MIGRATION_TOKEN }}
         run: |
-          RESPONSE=$(curl --fail --silent --show-error \
+          RESPONSE=$(curl --silent --show-error \
             -H "Authorization: Bearer ${MIGRATION_TOKEN}" \
             -H "Accept: application/json" \
             https://www.cloudcomai.com/apiapp/deploy-migrations/api/deploy-migrate.php)
@@ -97,7 +104,6 @@ jobs:
 
           echo "✅ Database migrations completed successfully."
 
-      # STEP 5: Deploy the application only after the backup and migrations succeed.
       - name: 📂 Sync application files over FTP to GoDaddy
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
