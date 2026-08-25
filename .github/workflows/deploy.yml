@@ -38,9 +38,8 @@ jobs:
             -H "Accept: application/json" \
             https://www.cloudcomai.com/apiapp/deploy-migrations/backup/deploy-backup.php)
 
-          echo "Backup response: ${RESPONSE}"
-
           SUCCESS=$(echo "${RESPONSE}" | python -c 'import json,sys; print(json.load(sys.stdin).get("success", False))')
+          echo "Backup success: ${SUCCESS}"
 
           if [ "${SUCCESS}" != "True" ]; then
             echo "❌ Backup failed."
@@ -48,7 +47,6 @@ jobs:
           fi
 
           echo "✅ Backup completed successfully."
-          echo "Backup response: ${RESPONSE}"
 
       - name: 📦 Prepare migration package
         run: |
@@ -70,20 +68,6 @@ jobs:
           protocol: ftp
           port: 21
 
-      - name: 🔎 Verify migration package files
-        env:
-          MIGRATION_TOKEN: ${{ secrets.MIGRATION_TOKEN }}
-        run: |
-          echo "Checking deployed migration endpoint..."
-          HTTP_CODE=$(curl --silent --output /tmp/migration-health-response.json --write-out "%{http_code}" \
-            -H "Authorization: Bearer ${MIGRATION_TOKEN}" \
-            -H "Accept: application/json" \
-            https://www.cloudcomai.com/apiapp/deploy-migrations/api/deploy-migrate.php || true)
-
-          echo "Migration endpoint HTTP status: ${HTTP_CODE}"
-          echo "Migration endpoint response:"
-          cat /tmp/migration-health-response.json || true
-
       - name: 🗄️ Run database migrations
         env:
           MIGRATION_TOKEN: ${{ secrets.MIGRATION_TOKEN }}
@@ -93,9 +77,8 @@ jobs:
             -H "Accept: application/json" \
             https://www.cloudcomai.com/apiapp/deploy-migrations/api/deploy-migrate.php)
 
-          echo "Migration response: ${RESPONSE}"
-
           SUCCESS=$(echo "${RESPONSE}" | python -c 'import json,sys; print(json.load(sys.stdin).get("success", False))')
+          echo "Migration success: ${SUCCESS}"
 
           if [ "${SUCCESS}" != "True" ]; then
             echo "❌ Database migration failed."
