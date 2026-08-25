@@ -45,12 +45,15 @@ jobs:
 
           echo "${RESPONSE}" | python -c 'import json,sys; data=json.load(sys.stdin); assert data.get("success") is True, data.get("error", "Backup failed"); assert int(data.get("size", 0)) > 0, "Backup archive is empty"; print(f"Verified backup: {data.get(\"backup\")} ({data.get(\"size\")} bytes)")'
 
-      # STEP 3: Build an isolated migration package.
+      # STEP 3: Build an isolated migration package. The package includes its
+      # own bootstrap, while the bootstrap reads the existing production DB
+      # configuration from /apiapp/config/config.php.
       - name: 📦 Prepare migration package
         run: |
           rm -rf migration-package
-          mkdir -p migration-package/scripts migration-package/database/migrations migration-package/api
+          mkdir -p migration-package/scripts migration-package/lib migration-package/database/migrations migration-package/api
           cp scripts/migrate.php migration-package/scripts/migrate.php
+          cp deploy-migrations/lib/bootstrap.php migration-package/lib/bootstrap.php
           cp api/deploy-migrate.php migration-package/api/deploy-migrate.php
           cp database/migrations/*.sql migration-package/database/migrations/
 
