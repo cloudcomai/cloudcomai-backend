@@ -12,7 +12,6 @@ jobs:
       - name: 🚚 Get latest repository code
         uses: actions/checkout@v4
 
-      # STEP 1: Upload only the backup endpoint into the isolated deployment area.
       - name: 📦 Prepare backup package
         run: |
           rm -rf backup-package
@@ -30,8 +29,6 @@ jobs:
           protocol: ftp
           port: 21
 
-      # STEP 2: Create and verify a compressed backup on GoDaddy BEFORE any
-      # application files are synchronized.
       - name: 🛡️ Create verified compressed server backup
         env:
           MIGRATION_TOKEN: ${{ secrets.MIGRATION_TOKEN }}
@@ -53,16 +50,62 @@ jobs:
           echo "✅ Backup completed successfully."
           echo "Backup response: ${RESPONSE}"
 
-      # STEP 3: Build an isolated migration package, including the bootstrap
-      # required for database connectivity.
+      # The migration package uses its own bootstrap. It loads the existing
+      # production config from /apiapp/config/config.php and does not copy
+      # credentials into the migration package.
       - name: 📦 Prepare migration package
         run: |
           rm -rf migration-package
           mkdir -p migration-package/scripts migration-package/database/migrations migration-package/api migration-package/lib
           cp scripts/migrate.php migration-package/scripts/migrate.php
           cp api/deploy-migrate.php migration-package/api/deploy-migrate.php
-          cp lib/bootstrap.php migration-package/lib/bootstrap.php
           cp database/migrations/*.sql migration-package/database/migrations/
+
+          cat > migration-package/lib/bootstrap.php <<'PHP'
+          <?php
+          declare(strict_types=1);
+
+          // Migration package path:
+          // /public_html/apiapp/deploy-migrations/lib/bootstrap.php
+          // Production config:
+          // /public_html/apiapp/config/config.php
+          $configFile = dirname(__DIR__, 2) . '/config/config.php';
+
+          if (!is_file($configFile) || !is_readable($configFile)) {
+              throw new RuntimeException('Production database configuration was not found.');
+          }
+
+          $config = require $configFile;
+          if (!is_array($config) || !isset($config['db']) || !is_array($config['db'])) {
+              throw new RuntimeException('Production database configuration is invalid.');
+          }
+
+          function db(): PDO
+          {
+              global $config;
+              static $pdo = null;
+
+              if ($pdo instanceof PDO) {
+                  return $pdo;
+              }
+
+              $d = $config['db'];
+              foreach (['host', 'name', 'user', 'pass', 'charset'] as $key) {
+                  if (!array_key_exists($key, $d)) {
+                      throw new RuntimeException("Database configuration is missing: {$key}");
+                  }
+              }
+
+              $dsn = "mysql:host={$d['host']};dbname={$d['name']};charset={$d['charset']}";
+              $pdo = new PDO($dsn, $d['user'], $d['pass'], [
+                  PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                  PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                  PDO::ATTR_EMULATE_PREPARES => false,
+              ]);
+
+              return $pdo;
+          }
+          PHP
 
       - name: 📂 Upload migration package only
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
@@ -75,17 +118,27 @@ jobs:
           protocol: ftp
           port: 21
 
-      # STEP 4: Run migrations only after the verified backup succeeds.
       - name: 🗄️ Run database migrations
         env:
           MIGRATION_TOKEN: ${{ secrets.MIGRATION_TOKEN }}
         run: |
-          curl --fail --silent --show-error \
+          RESPONSE=$(curl --fail --silent --show-error \
             -H "Authorization: Bearer ${MIGRATION_TOKEN}" \
             -H "Accept: application/json" \
-            https://www.cloudcomai.com/apiapp/deploy-migrations/api/deploy-migrate.php
+            https://www.cloudcomai.com/apiapp/deploy-migrations/api/deploy-migrate.php)
 
-      # STEP 5: Deploy the application only after the backup and migrations succeed.
+          echo "Migration response: ${RESPONSE}"
+
+          SUCCESS=$(echo "${RESPONSE}" | python -c 'import json,sys; print(json.load(sys.stdin).get("success", False))')
+
+          if [ "${SUCCESS}" != "True" ]; then
+            echo "❌ Database migration failed."
+            exit 1
+          fi
+
+          echo "✅ Database migrations completed successfully."
+          echo "Migration response: ${RESPONSE}"
+
       - name: 📂 Sync application files over FTP to GoDaddy
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
