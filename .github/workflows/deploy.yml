@@ -53,15 +53,16 @@ jobs:
           echo "✅ Backup completed successfully."
           echo "Backup response: ${RESPONSE}"
 
-      # STEP 3: Build an isolated migration package, including the bootstrap
-      # required for database connectivity.
+      # STEP 3: Build an isolated migration package. The migration bootstrap
+      # reads the existing production config without copying config.php into
+      # the package or exposing database credentials to GitHub.
       - name: 📦 Prepare migration package
         run: |
           rm -rf migration-package
           mkdir -p migration-package/scripts migration-package/database/migrations migration-package/api migration-package/lib
           cp scripts/migrate.php migration-package/scripts/migrate.php
+          cp scripts/migration-bootstrap.php migration-package/lib/bootstrap.php
           cp api/deploy-migrate.php migration-package/api/deploy-migrate.php
-          cp lib/bootstrap.php migration-package/lib/bootstrap.php
           cp database/migrations/*.sql migration-package/database/migrations/
 
       - name: 📂 Upload migration package only
@@ -80,10 +81,21 @@ jobs:
         env:
           MIGRATION_TOKEN: ${{ secrets.MIGRATION_TOKEN }}
         run: |
-          curl --fail --silent --show-error \
+          RESPONSE=$(curl --fail --silent --show-error \
             -H "Authorization: Bearer ${MIGRATION_TOKEN}" \
             -H "Accept: application/json" \
-            https://www.cloudcomai.com/apiapp/deploy-migrations/api/deploy-migrate.php
+            https://www.cloudcomai.com/apiapp/deploy-migrations/api/deploy-migrate.php)
+
+          echo "Migration response: ${RESPONSE}"
+
+          SUCCESS=$(echo "${RESPONSE}" | python -c 'import json,sys; print(json.load(sys.stdin).get("success", False))')
+
+          if [ "${SUCCESS}" != "True" ]; then
+            echo "❌ Database migration failed."
+            exit 1
+          fi
+
+          echo "✅ Database migrations completed successfully."
 
       # STEP 5: Deploy the application only after the backup and migrations succeed.
       - name: 📂 Sync application files over FTP to GoDaddy
