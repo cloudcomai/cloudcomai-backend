@@ -74,10 +74,10 @@ jobs:
         run: |
           rm -rf deploy-package
           mkdir -p deploy-package
-          rsync -a --exclude='.git/' --exclude='.github/' ./ deploy-package/
+          rsync -a --exclude='.git/' --exclude='.github/' --exclude='config/' ./ deploy-package/
 
-          echo "Initial deployment will synchronize the complete repository contents."
-          echo "No production configuration is generated or injected by the workflow."
+          echo "Initial deployment will synchronize all repository files except the protected config directory."
+          echo "The existing server config directory will not be deleted or modified."
 
       - name: 📂 Full initial deployment
         if: ${{ inputs.deployment_mode == 'initial' }}
@@ -92,7 +92,10 @@ jobs:
           server-dir: public_html/apiapp/
           protocol: ftp
           port: 21
-          dangerous-clean-slate: true
+          dangerous-clean-slate: false
+          exclude: |
+            config/**
+            **/config/**
 
       - name: 📦 Prepare migration package
         if: ${{ inputs.deployment_mode == 'release' }}
@@ -117,6 +120,7 @@ jobs:
           port: 21
           exclude: |
             backup/**
+            config/**
 
       - name: 🗄️ Run database migrations
         id: migration
@@ -159,6 +163,8 @@ jobs:
             **/.git*/**
             .github/**
             storage/**
+            config/**
+            **/config/**
             deploy-migrations/backup/**
 
       - name: 🔄 Roll back failed deployment to previous filesystem state
@@ -209,4 +215,4 @@ jobs:
           echo "Backup success: True"
           echo "Migration success: True"
           echo "Deployment success: True"
-          echo "Existing server state is protected by the compressed backup."
+          echo "Existing server config is protected from deployment changes."
