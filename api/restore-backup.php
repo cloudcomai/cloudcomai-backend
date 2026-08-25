@@ -5,6 +5,7 @@ declare(strict_types=1);
 /**
  * Restores a previously created compressed apiapp deployment backup.
  * The archive is stored outside public_html by deploy-backup.php.
+ * The live /apiapp/config directory is never replaced during rollback.
  * This endpoint is intended for GitHub Actions only.
  */
 header('Content-Type: application/json; charset=utf-8');
@@ -83,6 +84,9 @@ if ($documentRoot === '') {
 $applicationDirectory = $documentRoot . '/apiapp';
 $restoreRoot = rtrim($homeDirectory, '/') . '/deployment-restore-' . bin2hex(random_bytes(8));
 $oldApplicationDirectory = $documentRoot . '/apiapp-rollback-' . gmdate('Ymd-His') . '-' . bin2hex(random_bytes(4));
+$preservedConfigDirectory = rtrim($homeDirectory, '/') . '/apiapp-config-preserved-' . bin2hex(random_bytes(8));
+$configDirectory = $applicationDirectory . '/config';
+$configWasPreserved = false;
 
 try {
     if (!mkdir($restoreRoot, 0750, true)) {
@@ -120,9 +124,35 @@ try {
         throw new RuntimeException('Backup archive could not be extracted.');
     }
 
+    // Preserve the currently live config directory before replacing apiapp.
+    // The production config is intentionally server-managed and is never
+    // restored from Git or from an application backup.
+    if (is_dir($configDirectory)) {
+        if (!rename($configDirectory, $preservedConfigDirectory)) {
+            throw new RuntimeException('Unable to preserve the live config directory.');
+        }
+        $configWasPreserved = true;
+    }
+
     if (is_dir($applicationDirectory)) {
         if (!rename($applicationDirectory, $oldApplicationDirectory)) {
+            if ($configWasPreserved && !is_dir($configDirectory)) {
+                @rename($preservedConfigDirectory, $configDirectory);
+                $configWasPreserved = false;
+            }
             throw new RuntimeException('Unable to move the current application out of the way.');
+        }
+    }
+
+    // Never allow the backup archive to replace the live config directory.
+    $restoredConfigDirectory = $restoreRoot . '/apiapp/config';
+    if (is_dir($restoredConfigDirectory)) {
+        $deleteConfigCommand = sprintf('rm -rf -- %s 2>&1', escapeshellarg($restoredConfigDirectory));
+        $deleteConfigOutput = [];
+        $deleteConfigCode = 0;
+        exec($deleteConfigCommand, $deleteConfigOutput, $deleteConfigCode);
+        if ($deleteConfigCode !== 0) {
+            throw new RuntimeException('Unable to remove config from the restore payload.');
         }
     }
 
@@ -130,10 +160,30 @@ try {
         if (is_dir($oldApplicationDirectory)) {
             @rename($oldApplicationDirectory, $applicationDirectory);
         }
+        if ($configWasPreserved && !is_dir($configDirectory)) {
+            @rename($preservedConfigDirectory, $configDirectory);
+            $configWasPreserved = false;
+        }
         throw new RuntimeException('Unable to restore the backup application directory.');
     }
 
-    // The restored application is now live. Remove the temporary old state.
+    if ($configWasPreserved) {
+        if (!rename($preservedConfigDirectory, $configDirectory)) {
+            // Do not leave a deployment without its live config. Put the old
+            // application back if possible, then report rollback failure.
+            $deleteRestoredCommand = sprintf('rm -rf -- %s 2>&1', escapeshellarg($applicationDirectory));
+            $deleteRestoredOutput = [];
+            $deleteRestoredCode = 0;
+            exec($deleteRestoredCommand, $deleteRestoredOutput, $deleteRestoredCode);
+            if (is_dir($oldApplicationDirectory)) {
+                @rename($oldApplicationDirectory, $applicationDirectory);
+            }
+            @rename($preservedConfigDirectory, $configDirectory);
+            throw new RuntimeException('Unable to restore the protected config directory.');
+        }
+        $configWasPreserved = false;
+    }
+
     if (is_dir($oldApplicationDirectory)) {
         $deleteCommand = sprintf('rm -rf -- %s 2>&1', escapeshellarg($oldApplicationDirectory));
         $deleteOutput = [];
@@ -145,13 +195,15 @@ try {
     echo json_encode([
         'success' => true,
         'backup' => $backupName,
-        'message' => 'Deployment backup restored successfully.',
+        'message' => 'Deployment backup restored successfully; protected config was preserved.',
     ], JSON_UNESCAPED_SLASHES);
 } catch (Throwable $e) {
-    // If the live directory was moved and restoration failed, attempt to put
-    // the original directory back before returning failure.
     if (!is_dir($applicationDirectory) && is_dir($oldApplicationDirectory)) {
         @rename($oldApplicationDirectory, $applicationDirectory);
+    }
+
+    if ($configWasPreserved && !is_dir($configDirectory) && is_dir($preservedConfigDirectory)) {
+        @rename($preservedConfigDirectory, $configDirectory);
     }
 
     http_response_code(500);
@@ -166,5 +218,9 @@ try {
         $deleteOutput = [];
         $deleteCode = 0;
         exec($deleteCommand, $deleteOutput, $deleteCode);
+    }
+
+    if ($configWasPreserved && is_dir($preservedConfigDirectory) && !is_dir($configDirectory)) {
+        @rename($preservedConfigDirectory, $configDirectory);
     }
 }
