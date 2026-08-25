@@ -2,12 +2,16 @@
 
 declare(strict_types=1);
 
-require_once __DIR__ . '/../lib/bootstrap.php';
+// The migration package is deployed to /apiapp/deploy-migrations/ while the
+// application config and bootstrap remain in /apiapp/. This keeps the
+// migration-only FTP sync from deleting the live application files.
+$appRoot = dirname(__DIR__, 2);
+require_once $appRoot . '/lib/bootstrap.php';
 
 function cloudcomaiRunMigrations(): int
 {
     $pdo = db();
-    $migrationsPath = dirname(__DIR__) . '/database/migrations';
+    $migrationsPath = dirname(__DIR__, 2) . '/database/migrations';
     $lockName = 'cloudcomai_database_migration';
 
     if (!is_dir($migrationsPath)) {
