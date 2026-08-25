@@ -3,10 +3,16 @@
 declare(strict_types=1);
 
 // This script is deployed under /apiapp/deploy-migrations/scripts/.
-// The application itself remains under /apiapp/.
-$migrationRoot = dirname(__DIR__);
+// The migration package contains its own bootstrap under /apiapp/deploy-migrations/lib/.
+$bootstrap = __DIR__ . '/../lib/bootstrap.php';
 
-require_once $migrationRoot . '/lib/bootstrap.php';
+if (!is_file($bootstrap)) {
+    throw new RuntimeException("Migration bootstrap not found: {$bootstrap}");
+}
+
+require_once $bootstrap;
+
+$migrationRoot = dirname(__DIR__);
 
 function cloudcomaiRunMigrations(): int
 {
