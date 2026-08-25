@@ -5,21 +5,67 @@ declare(strict_types=1);
 /**
  * Protected deployment endpoint used by GitHub Actions to run database migrations.
  *
- * Required server environment variable:
- *   MIGRATION_TOKEN
+ * The migration token is stored in a server-only file outside public_html.
+ * Expected location:
+ *   /home/<cpanel-user>/.cloudcomai_migration_token.php
+ *
+ * File format:
+ *   <?php
+ *   return ['migration_token' => '...'];
  */
 
 header('Content-Type: application/json');
 
-$expectedToken = getenv('MIGRATION_TOKEN');
+$homeDirectory = (string)($_SERVER['HOME'] ?? getenv('HOME') ?: '');
 
-if ($expectedToken === false || $expectedToken === '') {
+if ($homeDirectory === '') {
+    $documentRoot = rtrim((string)($_SERVER['DOCUMENT_ROOT'] ?? ''), '/');
+    $homeDirectory = dirname($documentRoot);
+}
+
+$secretFile = rtrim($homeDirectory, '/') . '/.cloudcomai_migration_token.php';
+
+if (!is_file($secretFile) || !is_readable($secretFile)) {
     http_response_code(503);
-    echo json_encode(['success' => false, 'error' => 'Migration service is not configured.']);
+    echo json_encode([
+        'success' => false,
+        'error' => 'Migration service is not configured.'
+    ]);
+    exit;
+}
+
+try {
+    $secrets = require $secretFile;
+} catch (Throwable $e) {
+    http_response_code(503);
+    echo json_encode([
+        'success' => false,
+        'error' => 'Migration service is not configured.'
+    ]);
+    exit;
+}
+
+$expectedToken = is_array($secrets)
+    ? (string)($secrets['migration_token'] ?? '')
+    : '';
+
+if ($expectedToken === '') {
+    http_response_code(503);
+    echo json_encode([
+        'success' => false,
+        'error' => 'Migration service is not configured.'
+    ]);
     exit;
 }
 
 $authorization = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+
+// Some Apache/PHP configurations do not populate HTTP_AUTHORIZATION.
+if ($authorization === '' && function_exists('getallheaders')) {
+    $headers = getallheaders();
+    $authorization = $headers['Authorization'] ?? $headers['authorization'] ?? '';
+}
+
 $prefix = 'Bearer ';
 
 if (!str_starts_with($authorization, $prefix)) {
