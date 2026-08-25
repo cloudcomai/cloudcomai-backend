@@ -4,10 +4,9 @@ declare(strict_types=1);
 
 // This script is deployed under /apiapp/deploy-migrations/scripts/.
 // The application itself remains under /apiapp/.
-$appRoot = dirname(__DIR__, 2);
 $migrationRoot = dirname(__DIR__);
 
-require_once $appRoot . '/lib/bootstrap.php';
+require_once $migrationRoot . '/lib/bootstrap.php';
 
 function cloudcomaiRunMigrations(): int
 {

@@ -44,10 +44,23 @@ if ($expectedToken === '') {
     exit;
 }
 
-$authorization = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+// GoDaddy/Apache can expose Authorization under different server variables.
+// Prefer the standard header, then the CGI/redirected variants.
+$authorization = trim((string)(
+    $_SERVER['HTTP_AUTHORIZATION']
+    ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION']
+    ?? $_SERVER['REDIRECT_REDIRECT_HTTP_AUTHORIZATION']
+    ?? ''
+));
+
 if ($authorization === '' && function_exists('getallheaders')) {
     $headers = getallheaders();
-    $authorization = $headers['Authorization'] ?? $headers['authorization'] ?? '';
+    foreach ($headers as $name => $value) {
+        if (strcasecmp((string)$name, 'Authorization') === 0) {
+            $authorization = trim((string)$value);
+            break;
+        }
+    }
 }
 
 if (!preg_match('/^Bearer\s+(.+)$/i', $authorization, $matches)) {
