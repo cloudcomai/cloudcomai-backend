@@ -16,9 +16,14 @@ declare(strict_types=1);
 
 header('Content-Type: application/json');
 
-$documentRoot = rtrim((string)($_SERVER['DOCUMENT_ROOT'] ?? ''), '/');
-$homeDirectory = dirname($documentRoot);
-$secretFile = $homeDirectory . '/.cloudcomai_migration_token.php';
+$homeDirectory = (string)($_SERVER['HOME'] ?? getenv('HOME') ?: '');
+
+if ($homeDirectory === '') {
+    $documentRoot = rtrim((string)($_SERVER['DOCUMENT_ROOT'] ?? ''), '/');
+    $homeDirectory = dirname($documentRoot);
+}
+
+$secretFile = rtrim($homeDirectory, '/') . '/.cloudcomai_migration_token.php';
 
 if (!is_file($secretFile) || !is_readable($secretFile)) {
     http_response_code(503);
@@ -54,6 +59,13 @@ if ($expectedToken === '') {
 }
 
 $authorization = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+
+// Some Apache/PHP configurations do not populate HTTP_AUTHORIZATION.
+if ($authorization === '' && function_exists('getallheaders')) {
+    $headers = getallheaders();
+    $authorization = $headers['Authorization'] ?? $headers['authorization'] ?? '';
+}
+
 $prefix = 'Bearer ';
 
 if (!str_starts_with($authorization, $prefix)) {
