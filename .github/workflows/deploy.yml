@@ -2,37 +2,56 @@ name: 🚀 Secure Manual Deploy PHP Backend to GoDaddy
 
 on:
   workflow_dispatch:
+    inputs:
+      deployment_mode:
+        description: 'Choose initial recovery/full deployment once, then use release for subsequent deployments.'
+        required: true
+        type: choice
+        default: release
+        options:
+          - initial
+          - release
+
+concurrency:
+  group: cloudcomai-production-deploy
+  cancel-in-progress: false
 
 jobs:
   web-backup-and-deploy:
-    name: 🛡️ Backup, Migrate & Deploy
+    name: 🛡️ Backup, Migrate, Deploy & Rollback
     runs-on: ubuntu-latest
 
     steps:
       - name: 🚚 Get latest repository code
         uses: actions/checkout@v4
 
-      # STEP 1: Upload only the backup endpoint into the isolated deployment area.
-      - name: 📦 Prepare backup package
+      # The backup/restore endpoints must already exist for release deployments.
+      # On the initial deployment we install them first so the current server
+      # state can still be backed up before the full sync replaces it.
+      - name: 📦 Prepare deployment recovery tools
+        if: ${{ inputs.deployment_mode == 'initial' }}
         run: |
-          rm -rf backup-package
-          mkdir -p backup-package
-          cp api/deploy-backup.php backup-package/deploy-backup.php
+          rm -rf recovery-tools
+          mkdir -p recovery-tools
+          cp api/deploy-backup.php recovery-tools/deploy-backup.php
+          cp api/restore-backup.php recovery-tools/restore-backup.php
 
-      - name: 📂 Upload backup endpoint
+      - name: 📂 Install deployment recovery tools
+        if: ${{ inputs.deployment_mode == 'initial' }}
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
           server: ${{ secrets.FTP_SERVER }}
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
-          local-dir: ./backup-package/
+          local-dir: ./recovery-tools/
           server-dir: public_html/apiapp/deploy-migrations/backup/
           protocol: ftp
           port: 21
 
-      # STEP 2: Create and verify a compressed backup on GoDaddy BEFORE any
-      # application files are synchronized.
+      # Every deployment creates a compressed snapshot before changing the
+      # application. The returned filename becomes the rollback source of truth.
       - name: 🛡️ Create verified compressed server backup
+        id: backup
         env:
           MIGRATION_TOKEN: ${{ secrets.MIGRATION_TOKEN }}
         run: |
@@ -41,22 +60,58 @@ jobs:
             -H "Accept: application/json" \
             https://www.cloudcomai.com/apiapp/deploy-migrations/backup/deploy-backup.php)
 
-          echo "Backup response: ${RESPONSE}"
-
           SUCCESS=$(echo "${RESPONSE}" | python -c 'import json,sys; print(json.load(sys.stdin).get("success", False))')
+          BACKUP=$(echo "${RESPONSE}" | python -c 'import json,sys; print(json.load(sys.stdin).get("backup", ""))')
 
-          if [ "${SUCCESS}" != "True" ]; then
+          echo "Backup success: ${SUCCESS}"
+          echo "Backup: ${BACKUP}"
+
+          if [ "${SUCCESS}" != "True" ] || [ -z "${BACKUP}" ]; then
             echo "❌ Backup failed."
             exit 1
           fi
 
+          echo "BACKUP_NAME=${BACKUP}" >> "$GITHUB_ENV"
           echo "✅ Backup completed successfully."
-          echo "Backup response: ${RESPONSE}"
 
-      # STEP 3: Build an isolated migration package. The migration bootstrap
-      # reads the existing production config without copying config.php into
-      # the package or exposing database credentials to GitHub.
+      # Initial deployment can recreate config/config.php from the protected
+      # PRODUCTION_CONFIG_PHP GitHub secret. The secret is never committed.
+      - name: 🔐 Prepare initial full deployment package
+        if: ${{ inputs.deployment_mode == 'initial' }}
+        env:
+          PRODUCTION_CONFIG_PHP: ${{ secrets.PRODUCTION_CONFIG_PHP }}
+        run: |
+          rm -rf deploy-package
+          mkdir -p deploy-package
+          rsync -a --exclude='.git/' --exclude='.github/' ./ deploy-package/
+
+          if [ -z "${PRODUCTION_CONFIG_PHP}" ]; then
+            echo "❌ PRODUCTION_CONFIG_PHP secret is required for the initial deployment."
+            exit 1
+          fi
+
+          mkdir -p deploy-package/config
+          printf '%s\n' "${PRODUCTION_CONFIG_PHP}" > deploy-package/config/config.php
+
+      - name: 📂 Full initial deployment
+        if: ${{ inputs.deployment_mode == 'initial' }}
+        id: initial_deploy
+        continue-on-error: true
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          local-dir: ./deploy-package/
+          server-dir: public_html/apiapp/
+          protocol: ftp
+          port: 21
+          dangerous-clean-slate: true
+
+      # Release deployments run the migration against the currently deployed
+      # application/config, then only deploy the new application after success.
       - name: 📦 Prepare migration package
+        if: ${{ inputs.deployment_mode == 'release' }}
         run: |
           rm -rf migration-package
           mkdir -p migration-package/scripts migration-package/database/migrations migration-package/api migration-package/lib
@@ -66,6 +121,7 @@ jobs:
           cp database/migrations/*.sql migration-package/database/migrations/
 
       - name: 📂 Upload migration package only
+        if: ${{ inputs.deployment_mode == 'release' }}
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
           server: ${{ secrets.FTP_SERVER }}
@@ -76,12 +132,12 @@ jobs:
           protocol: ftp
           port: 21
 
-      # STEP 4: Run migrations only after the verified backup succeeds.
       - name: 🗄️ Run database migrations
+        id: migration
         env:
           MIGRATION_TOKEN: ${{ secrets.MIGRATION_TOKEN }}
         run: |
-          RESPONSE=$(curl --fail --silent --show-error \
+          RESPONSE=$(curl --silent --show-error \
             -H "Authorization: Bearer ${MIGRATION_TOKEN}" \
             -H "Accept: application/json" \
             https://www.cloudcomai.com/apiapp/deploy-migrations/api/deploy-migrate.php)
@@ -89,6 +145,7 @@ jobs:
           echo "Migration response: ${RESPONSE}"
 
           SUCCESS=$(echo "${RESPONSE}" | python -c 'import json,sys; print(json.load(sys.stdin).get("success", False))')
+          echo "Migration success: ${SUCCESS}"
 
           if [ "${SUCCESS}" != "True" ]; then
             echo "❌ Database migration failed."
@@ -97,16 +154,99 @@ jobs:
 
           echo "✅ Database migrations completed successfully."
 
-      # STEP 5: Deploy the application only after the backup and migrations succeed.
-      - name: 📂 Sync application files over FTP to GoDaddy
+      # Release deployment only happens after migration success. Production
+      # config and runtime uploads are excluded so the server's protected state
+      # is not removed by FTP synchronization.
+      - name: 📂 Deploy application release
+        if: ${{ inputs.deployment_mode == 'release' }}
+        id: release_deploy
+        continue-on-error: true
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
           server: ${{ secrets.FTP_SERVER }}
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
+          local-dir: ./
           server-dir: public_html/apiapp/
           protocol: ftp
           port: 21
+          exclude: |
+            **/.git*
+            **/.git*/**
+            .github/**
+            config/config.php
+            storage/**
+            deploy-migrations/backup/**
+
+      # If the application sync fails, restore the exact compressed filesystem
+      # snapshot that was created before this deployment.
+      - name: 🔄 Roll back failed application deployment
+        if: ${{ inputs.deployment_mode == 'release' && steps.release_deploy.outcome == 'failure' }}
+        env:
+          MIGRATION_TOKEN: ${{ secrets.MIGRATION_TOKEN }}
+        run: |
+          RESPONSE=$(curl --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer ${MIGRATION_TOKEN}" \
+            -H "Accept: application/json" \
+            --data-urlencode "backup=${BACKUP_NAME}" \
+            https://www.cloudcomai.com/apiapp/deploy-migrations/backup/restore-backup.php)
+
+          echo "Rollback response: ${RESPONSE}"
+
+          SUCCESS=$(echo "${RESPONSE}" | python -c 'import json,sys; print(json.load(sys.stdin).get("success", False))')
+          echo "Rollback success: ${SUCCESS}"
+
+          if [ "${SUCCESS}" != "True" ]; then
+            echo "❌ Rollback failed. Manual server recovery is required."
+            exit 1
+          fi
+
+          echo "✅ Previous filesystem state restored from compressed backup."
+          exit 1
+
+      - name: ❌ Fail initial deployment if FTP failed
+        if: ${{ inputs.deployment_mode == 'initial' && steps.initial_deploy.outcome == 'failure' }}
+        run: |
+          echo "❌ Initial full deployment failed."
+          exit 1
+
+      - name: 🔄 Roll back failed initial migration
+        if: ${{ inputs.deployment_mode == 'initial' && steps.migration.outcome == 'failure' }}
+        env:
+          MIGRATION_TOKEN: ${{ secrets.MIGRATION_TOKEN }}
+        run: |
+          RESPONSE=$(curl --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer ${MIGRATION_TOKEN}" \
+            -H "Accept: application/json" \
+            --data-urlencode "backup=${BACKUP_NAME}" \
+            https://www.cloudcomai.com/apiapp/deploy-migrations/backup/restore-backup.php)
+
+          echo "Rollback response: ${RESPONSE}"
+
+          SUCCESS=$(echo "${RESPONSE}" | python -c 'import json,sys; print(json.load(sys.stdin).get("success", False))')
+          echo "Rollback success: ${SUCCESS}"
+
+          if [ "${SUCCESS}" != "True" ]; then
+            echo "❌ Rollback failed. Manual server recovery is required."
+            exit 1
+          fi
+
+          echo "✅ Previous filesystem state restored from compressed backup."
+          exit 1
+
+      - name: ❌ Fail migration after rollback
+        if: ${{ steps.migration.outcome == 'failure' }}
+        run: exit 1
+
+      - name: ❌ Fail release deployment if FTP failed
+        if: ${{ inputs.deployment_mode == 'release' && steps.release_deploy.outcome == 'failure' }}
+        run: exit 1
 
       - name: ✅ Deployment completed
-        run: echo "Verified compressed backup, database migrations and application deployment completed successfully."
+        run: |
+          echo "Backup success: True"
+          echo "Migration success: True"
+          echo "Deployment success: True"
+          echo "Existing server state is protected by the compressed backup."
