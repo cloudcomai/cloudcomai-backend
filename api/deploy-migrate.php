@@ -5,9 +5,8 @@ declare(strict_types=1);
 /**
  * Protected deployment endpoint used by GitHub Actions to run database migrations.
  *
- * The endpoint is deployed under /apiapp/api/ while the migration-only package
- * is deployed under /apiapp/deploy-migrations/. The normal application files
- * are never removed by the migration upload.
+ * This endpoint is deployed under /apiapp/deploy-migrations/api/ so the
+ * migration-only FTP sync never deletes the live application files.
  */
 
 header('Content-Type: application/json; charset=utf-8');
@@ -61,7 +60,7 @@ if ($providedToken === '' || !hash_equals($expectedToken, $providedToken)) {
     exit;
 }
 
-$migrationScript = __DIR__ . '/../deploy-migrations/scripts/migrate.php';
+$migrationScript = __DIR__ . '/../scripts/migrate.php';
 
 if (!is_file($migrationScript)) {
     http_response_code(503);
@@ -88,8 +87,7 @@ try {
         ob_end_clean();
     }
 
-    // Return the migration exception message so GitHub Actions shows the real
-    // failure. Do not include configuration values, passwords, or tokens.
+    // Safe diagnostic: migration messages only; no credentials or tokens.
     http_response_code(500);
     echo json_encode([
         'success' => false,
