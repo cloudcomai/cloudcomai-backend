@@ -18,4 +18,9 @@ return [
         'token_secret' => 'CHANGE_TO_A_LONG_RANDOM_SECRET',
         'upload_dir' => __DIR__ . '/../storage/uploads',
     ],
+    'google' => [
+        'client_id' => 'YOUR_GOOGLE_OAUTH_CLIENT_ID',
+        'client_secret' => 'YOUR_GOOGLE_OAUTH_CLIENT_SECRET',
+        'redirect_uri' => 'https://www.cloudcomai.com/apiapp/api/google/callback.php',
+    ],
 ];
