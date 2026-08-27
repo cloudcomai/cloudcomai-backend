@@ -7,9 +7,8 @@ $webUrl = rtrim($config['app']['web_url'] ?? '', '/');
 function google_callback_page(string $webUrl, bool $success, string $message): never
 {
     $safeMessage = htmlspecialchars($message, ENT_QUOTES, 'UTF-8');
-    $safeWebUrl = htmlspecialchars($webUrl, ENT_QUOTES, 'UTF-8');
     $status = $success ? 'success' : 'error';
-    $redirect = $safeWebUrl !== '' ? $safeWebUrl . '/settings?google=' . rawurlencode($status) : '';
+    $redirect = $webUrl !== '' ? $webUrl . '/?google=' . rawurlencode($status) : '';
 
     header('Content-Type: text/html; charset=utf-8');
     echo '<!doctype html><html><head><meta charset="utf-8"><title>CloudComAI Google</title></head><body>';
