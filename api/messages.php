@@ -20,7 +20,13 @@ function hydrate_message_attachments(array &$messages): void {
             'download_policy' => $a['download_policy']
         ];
     }
-    foreach ($messages as &$message) $message['attachments'] = $attachments[(int)$message['id']] ?? [];
+    foreach ($messages as &$message) {
+        $messageAttachments = $attachments[(int)$message['id']] ?? [];
+        $message['attachments'] = $messageAttachments;
+        // The chat UI uses the primary attachment as `attachment` while
+        // retaining `attachments` for forward compatibility with multiple files.
+        $message['attachment'] = $messageAttachments[0] ?? null;
+    }
     unset($message);
 }
 
