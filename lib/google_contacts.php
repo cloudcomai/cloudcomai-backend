@@ -41,7 +41,6 @@ function google_http(string $url, array $headers = [], ?string $body = null, str
     if (!is_array($json)) {
         $json = ['raw' => $response];
     }
-
     return [$status, $json];
 }
 
@@ -80,7 +79,6 @@ function google_authorization_url(int $userId): string
 {
     $google = google_config();
     $state = bin2hex(random_bytes(32));
-
     db()->prepare(
         'INSERT INTO google_oauth_states(state, user_id, expires_at) VALUES (?, ?, UTC_TIMESTAMP() + INTERVAL 10 MINUTE)'
     )->execute([$state, $userId]);
@@ -98,7 +96,6 @@ function google_authorization_url(int $userId): string
         'state' => $state,
         'prompt' => 'consent',
     ];
-
     return 'https://accounts.google.com/o/oauth2/v2/auth?' . http_build_query($params, '', '&', PHP_QUERY_RFC3986);
 }
 
@@ -117,7 +114,6 @@ function google_exchange_code(string $code): array
         ], '', '&', PHP_QUERY_RFC3986),
         'POST'
     );
-
     if ($status !== 200 || empty($response['access_token'])) {
         throw new RuntimeException('Google authorization code exchange failed');
     }
@@ -138,7 +134,6 @@ function google_refresh_access_token(string $refreshToken): string
         ], '', '&', PHP_QUERY_RFC3986),
         'POST'
     );
-
     if ($status !== 200 || empty($response['access_token'])) {
         throw new RuntimeException('Google access token refresh failed');
     }
@@ -179,6 +174,8 @@ function google_sync_contacts(int $userId): array
     $addedOrUpdated = 0;
     $deleted = 0;
     $seen = 0;
+    $refreshedAccessToken = false;
+    $fullResync = false;
 
     do {
         $params = [
@@ -199,8 +196,9 @@ function google_sync_contacts(int $userId): array
             ['Authorization: Bearer ' . $accessToken]
         );
 
-        if ($status === 401) {
+        if ($status === 401 && !$refreshedAccessToken) {
             $accessToken = google_access_token_for_account($account);
+            $refreshedAccessToken = true;
             continue;
         }
         if ($status === 410 && $syncToken) {
@@ -208,8 +206,9 @@ function google_sync_contacts(int $userId): array
             $syncToken = null;
             $pageToken = null;
             $nextSyncToken = null;
-            $account['contacts_sync_token'] = null;
+            $fullResync = true;
             db()->prepare('UPDATE google_accounts SET contacts_sync_token = NULL WHERE id = ?')->execute([$account['id']]);
+            db()->prepare('UPDATE google_contacts SET deleted_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP() WHERE google_account_id = ? AND deleted_at IS NULL')->execute([$account['id']]);
             continue;
         }
         if ($status !== 200) {
@@ -273,6 +272,7 @@ function google_sync_contacts(int $userId): array
         'synced' => $addedOrUpdated,
         'deleted' => $deleted,
         'processed' => $seen,
-        'incremental' => (bool)$account['contacts_sync_token'],
+        'incremental' => !$fullResync && (bool)$account['contacts_sync_token'],
+        'full_resync' => $fullResync,
     ];
 }
