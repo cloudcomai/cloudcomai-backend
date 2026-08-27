@@ -1,0 +1,64 @@
+name: 🔎 Backend Deployment Failure Diagnostics
+
+on:
+  workflow_run:
+    workflows: ["🚀 Secure Manual Deploy PHP Backend to GoDaddy"]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  diagnostics:
+    name: Collect detailed failed deployment logs
+    if: ${{ github.event.workflow_run.conclusion == 'failure' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Download failed deployment logs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -e
+          mkdir -p deployment-failure-logs
+          gh run view "$RUN_ID" --repo "$REPOSITORY" --log > deployment-failure-logs/deployment-run.log || true
+          gh run view "$RUN_ID" --repo "$REPOSITORY" --json name,displayTitle,headBranch,headSha,status,conclusion,event,createdAt,updatedAt,jobs > deployment-failure-logs/run-details.json
+
+      - name: 🧾 Build failure summary
+        env:
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_NUMBER: ${{ github.event.workflow_run.run_number }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          {
+            echo "============================================================"
+            echo "CLOUDCOMAI BACKEND DEPLOYMENT FAILURE"
+            echo "============================================================"
+            echo "Run ID: ${RUN_ID}"
+            echo "Run number: ${RUN_NUMBER}"
+            echo "Branch: ${BRANCH}"
+            echo "Commit: ${SHA}"
+            echo "Time: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+            echo
+            echo "--- FAILED RUN DETAILS ---"
+            cat deployment-failure-logs/run-details.json
+            echo
+            echo "--- FULL GITHUB ACTIONS LOG ---"
+            cat deployment-failure-logs/deployment-run.log
+            echo
+            echo "============================================================"
+            echo "END DEPLOYMENT FAILURE DETAILS"
+            echo "============================================================"
+          } > deployment-failure-logs/deployment-failure-summary.log
+          cat deployment-failure-logs/deployment-failure-summary.log
+
+      - name: 📦 Upload detailed failure logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudcomai-backend-deployment-failure-${{ github.event.workflow_run.id }}
+          path: deployment-failure-logs/
+          retention-days: 14
+          if-no-files-found: error
