@@ -33,11 +33,23 @@ try {
 
     $subject = 'CloudComAI password reset';
     $body = "Hello {$user['name']},\n\nUse the link below to reset your CloudComAI password:\n{$resetUrl}\n\nThis link expires in 30 minutes.\n\nIf you did not request this, you can ignore this email.";
-    $headers = "From: CloudComAI <no-reply@cloudcomai.com>\r\n";
+
+    // Keep the sender configurable so the production cPanel/GoDaddy mailbox can be used
+    // without committing credentials or other environment-specific settings to Git.
+    $mailFrom = trim((string)($config['app']['mail_from'] ?? 'no-reply@cloudcomai.com'));
+    if (!filter_var($mailFrom, FILTER_VALIDATE_EMAIL)) {
+        $mailFrom = 'no-reply@cloudcomai.com';
+    }
+    $headers = "From: CloudComAI <{$mailFrom}>\r\n";
+    $headers .= "Reply-To: {$mailFrom}\r\n";
+    $headers .= "MIME-Version: 1.0\r\n";
     $headers .= "Content-Type: text/plain; charset=UTF-8\r\n";
 
-    if (!@mail($user['email'], $subject, $body, $headers)) {
-        error_log('Password reset email could not be sent for user ' . $user['id']);
+    // The envelope sender helps shared/cPanel hosting accept and deliver mail from the
+    // same domain as the From address. No SMTP credentials are stored in the repository.
+    $mailResult = @mail($user['email'], $subject, $body, $headers, '-f' . $mailFrom);
+    if (!$mailResult) {
+        error_log('Password reset email could not be sent for user ' . $user['id'] . ' to ' . $user['email']);
     }
 
     out(['message' => 'If the account exists and has a registered email address, password reset instructions have been sent.']);
