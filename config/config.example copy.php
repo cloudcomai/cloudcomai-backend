@@ -10,6 +10,7 @@ return [
     'app' => [
         'base_url' => 'https://api.cloudcomai.com',
         'web_url' => 'https://cloudcomai.com',
+        'mail_from' => 'no-reply@cloudcomai.com',
         'allowed_origins' => [
             'https://cloudcomai.com',
             'https://www.cloudcomai.com',
